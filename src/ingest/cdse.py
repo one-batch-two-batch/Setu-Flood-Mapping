@@ -46,6 +46,8 @@ def search_s1(bbox, start, end, product_type="IW_GRDH_1S"):
             "rel_orbit": _attr(p, "relativeOrbitNumber"),
             "direction": _attr(p, "orbitDirection"),
             "platform": _attr(p, "platformSerialIdentifier"),
+            "footprint": p.get("GeoFootprint"),
+            "footprint_wkt": p.get("Footprint"),
         })
     return out
 
@@ -81,3 +83,45 @@ def download(product_id, name, token, out_dir="/kaggle/temp"):
             for chunk in r.iter_content(1 << 20):
                 f.write(chunk)
     return path
+
+
+def _geom(p):
+    from shapely.geometry import shape
+    from shapely import wkt
+    if p.get("footprint"):
+        return shape(p["footprint"])
+    w = p.get("footprint_wkt") or ""
+    if "SRID" in w:
+        w = w.split(";", 1)[1].rstrip("'")
+    return wkt.loads(w) if w else None
+
+
+def find_covered_pairs(products, flood_date, bbox, min_cov=0.98):
+    """Like find_same_track_pairs, but works on whole passes (all slices of one
+    date) and keeps a track only if BOTH passes cover >= min_cov of the bbox."""
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    aoi = box(*bbox)
+    fd = datetime.strptime(flood_date, "%Y-%m-%d")
+    passes = {}
+    for p in products:
+        passes.setdefault((p["rel_orbit"], p["direction"], p["start"][:10]), []).append(p)
+    tracks = {}
+    for (orb, d, day), items in passes.items():
+        geoms = [g for g in (_geom(p) for p in items) if g is not None]
+        cov = unary_union(geoms).intersection(aoi).area / aoi.area if geoms else 0.0
+        tracks.setdefault((orb, d), []).append(
+            {"date": day, "slices": items, "coverage": round(cov, 3)})
+    pairs = []
+    for (orb, d), ps in tracks.items():
+        ok = [x for x in ps if x["coverage"] >= min_cov]
+        pre = [x for x in ok if datetime.strptime(x["date"], "%Y-%m-%d") < fd]
+        post = [x for x in ok if datetime.strptime(x["date"], "%Y-%m-%d") >= fd]
+        if pre and post:
+            a = max(pre, key=lambda x: x["date"])
+            b = min(post, key=lambda x: x["date"])
+            gap = (datetime.strptime(b["date"], "%Y-%m-%d")
+                   - datetime.strptime(a["date"], "%Y-%m-%d")).days
+            pairs.append({"rel_orbit": orb, "direction": d, "gap_days": gap,
+                          "pre": a, "post": b})
+    return sorted(pairs, key=lambda x: abs(x["gap_days"] - 12))
