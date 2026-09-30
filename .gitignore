@@ -1,0 +1,12 @@
+data/
+outputs/
+.env
+*.tif
+*.tiff
+*.pt
+*.pth
+*.safetensors
+*.zip
+*.SAFE
+__pycache__/
+.ipynb_checkpoints/
