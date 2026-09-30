@@ -10,8 +10,3 @@ outputs/
 *.SAFE
 __pycache__/
 .ipynb_checkpoints/
-
-*.db
-*.sqlite
-*.parquet
-*.npy
